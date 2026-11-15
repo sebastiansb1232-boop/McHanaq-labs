@@ -270,7 +270,7 @@ export function MapTool({
   const [metric, setMetric] = useState<MetricId>("activity_rate");
 
   const [showHotspots, setShowHotspots] = useState(true);
-  const [liveFirms, setLiveFirms] = useState(false);
+  const [liveFirms, setLiveFirms] = useState(true);
   const [firmsSummary, setFirmsSummary] = useState<string | null>(null);
   const [showChoropleth, setShowChoropleth] = useState(true);
   const [showCalendar, setShowCalendar] = useState(true);

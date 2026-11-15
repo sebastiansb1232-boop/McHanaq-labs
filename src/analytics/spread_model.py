@@ -372,14 +372,25 @@ def _bilinear_resize(arr: np.ndarray, out_rows: int, out_cols: int) -> np.ndarra
     return (top * (1.0 - wy) + bot * wy).astype(np.float32)
 
 
+def _smooth_grid_separable(arr: np.ndarray, passes: int = 4) -> np.ndarray:
+    """Suaviza una grilla 2D con un filtro binomial separable [0.25, 0.5, 0.25] para evitar bloques en derivadas."""
+    out = arr.astype(np.float32, copy=True)
+    for _ in range(passes):
+        p = np.pad(out, ((1, 1), (0, 0)), mode="edge")
+        out = 0.25 * p[:-2, :] + 0.5 * p[1:-1, :] + 0.25 * p[2:, :]
+        p = np.pad(out, ((0, 0), (1, 1)), mode="edge")
+        out = 0.25 * p[:, :-2] + 0.5 * p[:, 1:-1] + 0.25 * p[:, 2:]
+    return out
+
+
 def _fetch_open_meteo_dem_grid(
     bounds: dict[str, float],
     rows: int,
     cols: int,
     seed: int = 0,
 ) -> np.ndarray | None:
-    """Consulta elevación global Copernicus GLO-90 vía Open-Meteo Elevation API (malla 8x8)."""
-    sample_n = 8
+    """Consulta elevación global Copernicus GLO-90 vía Open-Meteo Elevation API (malla 10x10)."""
+    sample_n = 10
     lats = np.linspace(bounds["north"], bounds["south"], sample_n)
     lons = np.linspace(bounds["west"], bounds["east"], sample_n)
     lat_pts: list[str] = []
@@ -401,15 +412,15 @@ def _fetch_open_meteo_dem_grid(
         if len(elev) != sample_n * sample_n:
             return None
         coarse = np.array([float(v) for v in elev], dtype=np.float32).reshape((sample_n, sample_n))
-        fine = _bilinear_resize(coarse, rows, cols)
-        micro = (_fbm_grid(rows, cols, seed=seed ^ 0x517CC1B7, scale_x=6.0, scale_y=6.0, octaves=3) - 0.5) * 6.0
+        fine = _smooth_grid_separable(_bilinear_resize(coarse, rows, cols), passes=5)
+        micro = (_fbm_grid(rows, cols, seed=seed ^ 0x517CC1B7, scale_x=6.0, scale_y=6.0, octaves=3) - 0.5) * 4.5
         return np.maximum(0.0, fine + micro).astype(np.float32)
     except Exception:
         return None
 
 
 def _fetch_planetary_computer_savi_grid(
-    bounds: tuple[float, float, float, float],
+    bounds: dict[str, float] | tuple[float, float, float, float],
     rows: int,
     cols: int,
     date_str: str,
@@ -433,7 +444,15 @@ def _fetch_planetary_computer_savi_grid(
     anchor_dt = min(target_dt, now_utc)
     start_s = (anchor_dt - timedelta(days=45)).strftime("%Y-%m-%d")
     end_s = anchor_dt.strftime("%Y-%m-%d")
-    west, south, east, north = bounds
+    if isinstance(bounds, dict):
+        west, south, east, north = (
+            float(bounds["west"]),
+            float(bounds["south"]),
+            float(bounds["east"]),
+            float(bounds["north"]),
+        )
+    else:
+        west, south, east, north = (float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3]))
 
     search_payload = json.dumps(
         {
@@ -581,20 +600,7 @@ def build_territory_grids(
         # Simulación física de reflectancias NIR y RED para calcular SAVI auténtico (Huete 1988)
         red = np.clip(0.24 - 0.17 * veg_frac * veg_noise, 0.03, 0.35)
         nir = np.clip(0.16 + 0.44 * veg_frac * (0.35 + 0.65 * veg_noise), 0.12, 0.72)
-        # Corredor fluvial sinuoso (corte de combustible / agua superficial) desplazado de la ignición
-        yy, xx = np.meshgrid(np.linspace(-1.0, 1.0, rows), np.linspace(-1.0, 1.0, cols), indexing="ij")
-        river_center = -0.44 + 0.11 * np.sin(yy * 4.2 + (seed % 5))
-        river_mask = np.abs(xx - river_center) < 0.032
-        red = np.where(river_mask, 0.14, red)
-        nir = np.where(river_mask, 0.06, nir)
         savi_arr = compute_savi(nir, red, l_factor=0.5)
-        # Asegurar que la celda de ignición sea combustible
-        ig_r = int(np.clip(((bounds["north"] - ignition_lat) / (bounds["north"] - bounds["south"])) * rows, 0, rows - 1))
-        ig_c = int(np.clip(((ignition_lon - bounds["west"]) / (bounds["east"] - bounds["west"])) * cols, 0, cols - 1))
-        savi_arr[max(0, ig_r - 2):min(rows, ig_r + 3), max(0, ig_c - 2):min(cols, ig_c + 3)] = np.maximum(
-            savi_arr[max(0, ig_r - 2):min(rows, ig_r + 3), max(0, ig_c - 2):min(cols, ig_c + 3)],
-            0.46,
-        )
         savi_source = "SAVI_HUETE1988_VEG_CALIBRATED"
     else:
         savi_arr = np.where(np.isnan(savi_arr), 0.0, np.clip(savi_arr, -1.0, 1.0)).astype(np.float32)

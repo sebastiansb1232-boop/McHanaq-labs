@@ -55,10 +55,16 @@ ENV_METRICS = {
 }
 
 
+FIXTURES_DATA = ROOT / "data" / "fixtures"
+
+
 def load_json(name: str):
-    """Carga un JSON/GeoJSON desde DATA si existe."""
+    """Carga un JSON/GeoJSON desde DATA si existe, con respaldo en data/fixtures."""
     path = DATA / name
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    fallback = FIXTURES_DATA / name
+    return json.loads(fallback.read_text(encoding="utf-8")) if fallback.exists() else None
 
 
 META = load_json("metadata.json") or {}

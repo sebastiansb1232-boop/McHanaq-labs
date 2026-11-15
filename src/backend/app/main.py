@@ -68,6 +68,10 @@ def load_json(name: str):
 
 
 META = load_json("metadata.json") or {}
+if not any((META.get("available_date_ranges_by_sensor") or {}).values()):
+    _fx_meta = FIXTURES_DATA / "metadata.json"
+    if _fx_meta.exists():
+        META = json.loads(_fx_meta.read_text(encoding="utf-8"))
 TERR = (
     load_json("peru_territories.geojson")
     or load_json("territories.geojson")

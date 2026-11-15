@@ -314,7 +314,7 @@ export function MapTool({
     fuelMoisturePct: 9,
     vegetationPct: 72,
     slopeMeanDeg: 8,
-    horizonHours: 12,
+    horizonHours: 48,
   });
   const [spread, setSpread] = useState<SpreadResult | null>(null);
   const [spreadRunning, setSpreadRunning] = useState(false);
